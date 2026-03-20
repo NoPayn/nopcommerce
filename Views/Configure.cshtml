@@ -1,0 +1,82 @@
+@model Nop.Plugin.Payments.NoPayn.Models.ConfigurationModel
+
+@{
+    Layout = "_ConfigurePlugin";
+}
+
+<form asp-controller="NoPayn" asp-action="Configure" method="post">
+    <div class="card card-default">
+        <div class="card-header">
+            <p class="card-title">NoPayn Payment Gateway</p>
+        </div>
+        <div class="card-body">
+            <p class="mb-3">
+                Configure your NoPayn payment gateway settings below. Get your API key from
+                <a href="https://manage.nopayn.io/" target="_blank">manage.nopayn.io</a>.
+            </p>
+
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <nop-label asp-for="ApiKey" />
+                </div>
+                <div class="col-md-9">
+                    <nop-editor asp-for="ApiKey" />
+                    <span asp-validation-for="ApiKey"></span>
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <nop-label asp-for="EnableCreditCard" />
+                </div>
+                <div class="col-md-9">
+                    <nop-editor asp-for="EnableCreditCard" />
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <nop-label asp-for="EnableApplePay" />
+                </div>
+                <div class="col-md-9">
+                    <nop-editor asp-for="EnableApplePay" />
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <nop-label asp-for="EnableGooglePay" />
+                </div>
+                <div class="col-md-9">
+                    <nop-editor asp-for="EnableGooglePay" />
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <nop-label asp-for="EnableVippsMobilePay" />
+                </div>
+                <div class="col-md-9">
+                    <nop-editor asp-for="EnableVippsMobilePay" />
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <nop-label asp-for="AdditionalFee" />
+                </div>
+                <div class="col-md-9">
+                    <nop-editor asp-for="AdditionalFee" />
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <nop-label asp-for="AdditionalFeePercentage" />
+                </div>
+                <div class="col-md-9">
+                    <nop-editor asp-for="AdditionalFeePercentage" />
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-md-9 offset-md-3">
+                    <input type="submit" name="save" class="btn btn-primary" value="@T("Admin.Common.Save")" />
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
