@@ -1,8 +1,8 @@
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
+using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using Nop.Data;
-using Nop.Core.Domain.Orders;
 using Nop.Plugin.Payments.NoPayn.Services;
 using Nop.Services.Logging;
 using Nop.Services.Orders;
@@ -12,7 +12,6 @@ namespace Nop.Plugin.Payments.NoPayn.Controllers;
 public class NoPaynPaymentController : Controller
 {
     private readonly NoPaynApiClient _apiClient;
-    private readonly NoPaynSettings _settings;
     private readonly IOrderService _orderService;
     private readonly IOrderProcessingService _orderProcessingService;
     private readonly IRepository<Order> _orderRepository;
@@ -20,14 +19,12 @@ public class NoPaynPaymentController : Controller
 
     public NoPaynPaymentController(
         NoPaynApiClient apiClient,
-        NoPaynSettings settings,
         IOrderService orderService,
         IOrderProcessingService orderProcessingService,
         IRepository<Order> orderRepository,
         ILogger logger)
     {
         _apiClient = apiClient;
-        _settings = settings;
         _orderService = orderService;
         _orderProcessingService = orderProcessingService;
         _orderRepository = orderRepository;
@@ -55,8 +52,7 @@ public class NoPaynPaymentController : Controller
 
             if (status == "completed")
             {
-                if (_orderProcessingService.CanMarkOrderAsPaid(order))
-                    await _orderProcessingService.MarkOrderAsPaidAsync(order);
+                await MarkOrderAsPaidProcessingAsync(order);
             }
             else if (status is "cancelled" or "expired" or "error")
             {
@@ -139,8 +135,7 @@ public class NoPaynPaymentController : Controller
 
             if (status == "completed")
             {
-                if (_orderProcessingService.CanMarkOrderAsPaid(order))
-                    await _orderProcessingService.MarkOrderAsPaidAsync(order);
+                await MarkOrderAsPaidProcessingAsync(order);
             }
             else if (status is "cancelled" or "expired" or "error")
             {
@@ -155,5 +150,28 @@ public class NoPaynPaymentController : Controller
             await _logger.ErrorAsync($"NoPayn webhook error for order {nopaynOrderId}", ex);
             return StatusCode(500);
         }
+    }
+
+    /// <summary>
+    /// Sets payment to Paid and order to Processing.
+    /// Deliberately avoids MarkOrderAsPaidAsync which auto-promotes to Complete.
+    /// </summary>
+    private async Task MarkOrderAsPaidProcessingAsync(Order order)
+    {
+        if (order.PaymentStatus == PaymentStatus.Paid)
+            return;
+
+        order.PaymentStatusId = (int)PaymentStatus.Paid;
+        order.PaidDateUtc = DateTime.UtcNow;
+        order.OrderStatusId = (int)OrderStatus.Processing;
+        await _orderService.UpdateOrderAsync(order);
+
+        await _orderService.InsertOrderNoteAsync(new OrderNote
+        {
+            OrderId = order.Id,
+            Note = "Payment confirmed by NoPayn. Order set to Processing.",
+            DisplayToCustomer = false,
+            CreatedOnUtc = DateTime.UtcNow
+        });
     }
 }
