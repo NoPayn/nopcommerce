@@ -20,9 +20,15 @@ public record ConfigurationModel : BaseNopModel
     [NopResourceDisplayName("Plugins.Payments.NoPayn.Fields.EnableVippsMobilePay")]
     public bool EnableVippsMobilePay { get; set; }
 
+    [NopResourceDisplayName("Plugins.Payments.NoPayn.Fields.CreditCardManualCapture")]
+    public bool CreditCardManualCapture { get; set; }
+
     [NopResourceDisplayName("Plugins.Payments.NoPayn.Fields.AdditionalFee")]
     public decimal AdditionalFee { get; set; }
 
     [NopResourceDisplayName("Plugins.Payments.NoPayn.Fields.AdditionalFeePercentage")]
     public bool AdditionalFeePercentage { get; set; }
+
+    [NopResourceDisplayName("Plugins.Payments.NoPayn.Fields.DebugLogging")]
+    public bool DebugLogging { get; set; }
 }

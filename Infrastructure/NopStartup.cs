@@ -14,6 +14,7 @@ public class NopStartup : INopStartup
     {
         services.AddHttpClient();
         services.AddScoped<NoPaynApiClient>();
+        services.AddScoped<NoPaynLogger>();
     }
 
     public void Configure(IApplicationBuilder application)

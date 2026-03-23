@@ -9,6 +9,8 @@ public class NoPaynSettings : ISettings
     public bool EnableApplePay { get; set; } = true;
     public bool EnableGooglePay { get; set; } = true;
     public bool EnableVippsMobilePay { get; set; } = true;
+    public bool CreditCardManualCapture { get; set; }
     public decimal AdditionalFee { get; set; }
     public bool AdditionalFeePercentage { get; set; }
+    public bool DebugLogging { get; set; }
 }

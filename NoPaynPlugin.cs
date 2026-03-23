@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
 using Nop.Core;
@@ -5,11 +6,13 @@ using Nop.Core.Domain.Orders;
 using Nop.Core.Domain.Payments;
 using Nop.Plugin.Payments.NoPayn.Components;
 using Nop.Plugin.Payments.NoPayn.Services;
+using Nop.Services.Catalog;
 using Nop.Services.Configuration;
 using Nop.Services.Localization;
 using Nop.Services.Orders;
 using Nop.Services.Payments;
 using Nop.Services.Plugins;
+using Nop.Services.Tax;
 
 namespace Nop.Plugin.Payments.NoPayn;
 
@@ -17,28 +20,37 @@ public class NoPaynPlugin : BasePlugin, IPaymentMethod
 {
     private readonly NoPaynSettings _settings;
     private readonly NoPaynApiClient _apiClient;
+    private readonly NoPaynLogger _nopaynLogger;
     private readonly ISettingService _settingService;
     private readonly ILocalizationService _localizationService;
     private readonly IWebHelper _webHelper;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IOrderService _orderService;
+    private readonly IProductService _productService;
+    private readonly ITaxService _taxService;
 
     public NoPaynPlugin(
         NoPaynSettings settings,
         NoPaynApiClient apiClient,
+        NoPaynLogger nopaynLogger,
         ISettingService settingService,
         ILocalizationService localizationService,
         IWebHelper webHelper,
         IHttpContextAccessor httpContextAccessor,
-        IOrderService orderService)
+        IOrderService orderService,
+        IProductService productService,
+        ITaxService taxService)
     {
         _settings = settings;
         _apiClient = apiClient;
+        _nopaynLogger = nopaynLogger;
         _settingService = settingService;
         _localizationService = localizationService;
         _webHelper = webHelper;
         _httpContextAccessor = httpContextAccessor;
         _orderService = orderService;
+        _productService = productService;
+        _taxService = taxService;
     }
 
     public bool SupportCapture => false;
@@ -68,23 +80,77 @@ public class NoPaynPlugin : BasePlugin, IPaymentMethod
         var amountCents = (int)Math.Round(order.OrderTotal * 100);
         var orderNumber = order.CustomOrderNumber ?? order.Id.ToString();
 
-        var apiParams = new
+        // Determine if manual capture applies
+        var useManualCapture = _settings.CreditCardManualCapture &&
+                               nopaynMethod == NoPaynDefaults.PaymentMethods.CreditCard;
+
+        _nopaynLogger.LogInfo($"Creating NoPayn order for nopCommerce order #{orderNumber}, method={nopaynMethod}, amount={amountCents}, manualCapture={useManualCapture}");
+
+        // Build order lines from order items
+        var orderItems = await _orderService.GetOrderItemsAsync(order.Id);
+        var orderLines = new JsonArray();
+        foreach (var item in orderItems)
         {
-            currency = order.CustomerCurrencyCode,
-            amount = amountCents,
-            merchant_order_id = orderNumber,
-            description = $"Order #{orderNumber}",
-            return_url = $"{storeUrl}NoPayn/PaymentReturn?orderId={order.Id}",
-            failure_url = $"{storeUrl}NoPayn/PaymentCancel?orderId={order.Id}",
-            webhook_url = $"{storeUrl}NoPayn/Webhook",
-            transactions = new[]
+            var product = await _productService.GetProductByIdAsync(item.ProductId);
+            var productName = product?.Name ?? $"Item #{item.Id}";
+
+            // Calculate VAT percentage from the item prices
+            var vatPercentage = 0m;
+            if (item.UnitPriceExclTax > 0 && item.UnitPriceInclTax > item.UnitPriceExclTax)
+                vatPercentage = Math.Round((item.UnitPriceInclTax - item.UnitPriceExclTax) / item.UnitPriceExclTax * 100, 2);
+
+            orderLines.Add(new JsonObject
             {
-                new
-                {
-                    payment_method = nopaynMethod,
-                    expiration_period = NoPaynDefaults.ExpirationPeriod
-                }
-            }
+                ["type"] = "physical",
+                ["name"] = productName,
+                ["quantity"] = item.Quantity,
+                ["amount"] = (int)Math.Round(item.UnitPriceExclTax * 100),
+                ["currency"] = order.CustomerCurrencyCode,
+                ["vat_percentage"] = (int)(vatPercentage * 100),
+                ["merchant_order_line_id"] = item.Id.ToString()
+            });
+        }
+
+        // Add shipping fee line if applicable
+        if (order.OrderShippingExclTax > 0)
+        {
+            var shippingVatPercentage = 0m;
+            if (order.OrderShippingExclTax > 0 && order.OrderShippingInclTax > order.OrderShippingExclTax)
+                shippingVatPercentage = Math.Round((order.OrderShippingInclTax - order.OrderShippingExclTax) / order.OrderShippingExclTax * 100, 2);
+
+            orderLines.Add(new JsonObject
+            {
+                ["type"] = "shipping_fee",
+                ["name"] = "Shipping",
+                ["quantity"] = 1,
+                ["amount"] = (int)Math.Round(order.OrderShippingExclTax * 100),
+                ["currency"] = order.CustomerCurrencyCode,
+                ["vat_percentage"] = (int)(shippingVatPercentage * 100),
+                ["merchant_order_line_id"] = $"shipping-{order.Id}"
+            });
+        }
+
+        // Build transaction object
+        var transaction = new JsonObject
+        {
+            ["payment_method"] = nopaynMethod,
+            ["expiration_period"] = NoPaynDefaults.ExpirationPeriod
+        };
+
+        if (useManualCapture)
+            transaction["capture_mode"] = "manual";
+
+        var apiParams = new JsonObject
+        {
+            ["currency"] = order.CustomerCurrencyCode,
+            ["amount"] = amountCents,
+            ["merchant_order_id"] = orderNumber,
+            ["description"] = $"Order #{orderNumber}",
+            ["return_url"] = $"{storeUrl}NoPayn/PaymentReturn?orderId={order.Id}",
+            ["failure_url"] = $"{storeUrl}NoPayn/PaymentCancel?orderId={order.Id}",
+            ["webhook_url"] = $"{storeUrl}NoPayn/Webhook",
+            ["transactions"] = new JsonArray { transaction },
+            ["order_lines"] = orderLines
         };
 
         var result = await _apiClient.CreateOrderAsync(apiParams);
@@ -95,8 +161,10 @@ public class NoPaynPlugin : BasePlugin, IPaymentMethod
 
         order.AuthorizationTransactionId = nopaynOrderId;
         order.AuthorizationTransactionCode = nopaynMethod;
-        order.AuthorizationTransactionResult = "new";
+        order.AuthorizationTransactionResult = useManualCapture ? "new|manual_capture" : "new";
         await _orderService.UpdateOrderAsync(order);
+
+        _nopaynLogger.LogInfo($"NoPayn order created: {nopaynOrderId} for nopCommerce order #{orderNumber}");
 
         var paymentUrl = result?["transactions"]?[0]?["payment_url"]?.GetValue<string>()
                          ?? result?["order_url"]?.GetValue<string>();
@@ -198,8 +266,12 @@ public class NoPaynPlugin : BasePlugin, IPaymentMethod
             ["Plugins.Payments.NoPayn.Fields.EnableApplePay"] = "Enable Apple Pay",
             ["Plugins.Payments.NoPayn.Fields.EnableGooglePay"] = "Enable Google Pay",
             ["Plugins.Payments.NoPayn.Fields.EnableVippsMobilePay"] = "Enable Vipps MobilePay",
+            ["Plugins.Payments.NoPayn.Fields.CreditCardManualCapture"] = "Credit Card Manual Capture",
+            ["Plugins.Payments.NoPayn.Fields.CreditCardManualCapture.Hint"] = "When enabled, credit card payments are authorized only; capture occurs when order moves to Processing, Shipped, or Complete.",
             ["Plugins.Payments.NoPayn.Fields.AdditionalFee"] = "Additional Fee",
             ["Plugins.Payments.NoPayn.Fields.AdditionalFeePercentage"] = "Additional Fee (percentage)",
+            ["Plugins.Payments.NoPayn.Fields.DebugLogging"] = "Debug Logging",
+            ["Plugins.Payments.NoPayn.Fields.DebugLogging.Hint"] = "Enable detailed logging of API requests, responses, and webhook events to App_Data/Logs/NoPayn_debug.log.",
             ["Plugins.Payments.NoPayn.PaymentMethodDescription"] = "Pay with Credit/Debit Card, Apple Pay, Google Pay, or Vipps MobilePay",
             ["Plugins.Payments.NoPayn.Instructions"] = "Select your preferred payment method:",
         });

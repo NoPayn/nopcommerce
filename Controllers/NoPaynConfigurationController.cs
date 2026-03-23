@@ -40,8 +40,10 @@ public class NoPaynController : BasePaymentController
             EnableApplePay = _settings.EnableApplePay,
             EnableGooglePay = _settings.EnableGooglePay,
             EnableVippsMobilePay = _settings.EnableVippsMobilePay,
+            CreditCardManualCapture = _settings.CreditCardManualCapture,
             AdditionalFee = _settings.AdditionalFee,
-            AdditionalFeePercentage = _settings.AdditionalFeePercentage
+            AdditionalFeePercentage = _settings.AdditionalFeePercentage,
+            DebugLogging = _settings.DebugLogging
         };
 
         return View("~/Plugins/Payments.NoPayn/Views/Configure.cshtml", model);
@@ -58,8 +60,10 @@ public class NoPaynController : BasePaymentController
         _settings.EnableApplePay = model.EnableApplePay;
         _settings.EnableGooglePay = model.EnableGooglePay;
         _settings.EnableVippsMobilePay = model.EnableVippsMobilePay;
+        _settings.CreditCardManualCapture = model.CreditCardManualCapture;
         _settings.AdditionalFee = model.AdditionalFee;
         _settings.AdditionalFeePercentage = model.AdditionalFeePercentage;
+        _settings.DebugLogging = model.DebugLogging;
 
         await _settingService.SaveSettingAsync(_settings);
         await _settingService.ClearCacheAsync();

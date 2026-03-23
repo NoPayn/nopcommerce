@@ -12,6 +12,7 @@ namespace Nop.Plugin.Payments.NoPayn.Controllers;
 public class NoPaynPaymentController : Controller
 {
     private readonly NoPaynApiClient _apiClient;
+    private readonly NoPaynLogger _nopaynLogger;
     private readonly IOrderService _orderService;
     private readonly IOrderProcessingService _orderProcessingService;
     private readonly IRepository<Order> _orderRepository;
@@ -19,12 +20,14 @@ public class NoPaynPaymentController : Controller
 
     public NoPaynPaymentController(
         NoPaynApiClient apiClient,
+        NoPaynLogger nopaynLogger,
         IOrderService orderService,
         IOrderProcessingService orderProcessingService,
         IRepository<Order> orderRepository,
         ILogger logger)
     {
         _apiClient = apiClient;
+        _nopaynLogger = nopaynLogger;
         _orderService = orderService;
         _orderProcessingService = orderProcessingService;
         _orderRepository = orderRepository;
@@ -34,6 +37,8 @@ public class NoPaynPaymentController : Controller
     [HttpGet("NoPayn/PaymentReturn")]
     public async Task<IActionResult> PaymentReturn(int orderId)
     {
+        _nopaynLogger.LogInfo($"PaymentReturn called for order #{orderId}");
+
         var order = await _orderService.GetOrderByIdAsync(orderId);
         if (order == null)
             return RedirectToRoute("Homepage");
@@ -47,7 +52,12 @@ public class NoPaynPaymentController : Controller
             var apiOrder = await _apiClient.GetOrderAsync(nopaynOrderId);
             var status = apiOrder?["status"]?.GetValue<string>() ?? "error";
 
-            order.AuthorizationTransactionResult = status;
+            _nopaynLogger.LogInfo($"PaymentReturn: NoPayn order {nopaynOrderId} status={status}");
+
+            // Preserve manual_capture flag if present
+            var previousResult = order.AuthorizationTransactionResult ?? string.Empty;
+            var manualCaptureFlag = previousResult.Contains("manual_capture") ? "|manual_capture" : string.Empty;
+            order.AuthorizationTransactionResult = status + manualCaptureFlag;
             await _orderService.UpdateOrderAsync(order);
 
             if (status == "completed")
@@ -64,6 +74,7 @@ public class NoPaynPaymentController : Controller
         }
         catch (Exception ex)
         {
+            _nopaynLogger.LogError($"PaymentReturn error for order #{orderId}", ex);
             await _logger.ErrorAsync("NoPayn PaymentReturn error", ex);
         }
 
@@ -73,6 +84,8 @@ public class NoPaynPaymentController : Controller
     [HttpGet("NoPayn/PaymentCancel")]
     public async Task<IActionResult> PaymentCancel(int orderId)
     {
+        _nopaynLogger.LogInfo($"PaymentCancel called for order #{orderId}");
+
         var order = await _orderService.GetOrderByIdAsync(orderId);
         if (order == null)
             return RedirectToRoute("Homepage");
@@ -87,6 +100,7 @@ public class NoPaynPaymentController : Controller
         }
         catch (Exception ex)
         {
+            _nopaynLogger.LogError($"PaymentCancel error for order #{orderId}", ex);
             await _logger.ErrorAsync("NoPayn PaymentCancel error", ex);
         }
 
@@ -100,6 +114,8 @@ public class NoPaynPaymentController : Controller
         using var reader = new StreamReader(Request.Body);
         var body = await reader.ReadToEndAsync();
 
+        _nopaynLogger.LogWebhook("Webhook received", body);
+
         JsonNode? data;
         try
         {
@@ -107,12 +123,16 @@ public class NoPaynPaymentController : Controller
         }
         catch
         {
+            _nopaynLogger.LogError("Webhook: failed to parse JSON body");
             return BadRequest();
         }
 
         var nopaynOrderId = data?["order_id"]?.GetValue<string>();
         if (string.IsNullOrEmpty(nopaynOrderId))
+        {
+            _nopaynLogger.LogError("Webhook: missing order_id in payload");
             return BadRequest();
+        }
 
         try
         {
@@ -120,17 +140,28 @@ public class NoPaynPaymentController : Controller
                 .FirstOrDefault(o => o.AuthorizationTransactionId == nopaynOrderId);
 
             if (order == null)
+            {
+                _nopaynLogger.LogInfo($"Webhook: no matching nopCommerce order found for NoPayn order {nopaynOrderId}");
                 return Ok();
+            }
 
             if (order.PaymentStatus is PaymentStatus.Paid
                 or PaymentStatus.Voided
                 or PaymentStatus.Refunded)
+            {
+                _nopaynLogger.LogInfo($"Webhook: order #{order.Id} already in final payment status {order.PaymentStatus}, skipping");
                 return Ok();
+            }
 
             var apiOrder = await _apiClient.GetOrderAsync(nopaynOrderId);
             var status = apiOrder?["status"]?.GetValue<string>() ?? "error";
 
-            order.AuthorizationTransactionResult = status;
+            _nopaynLogger.LogInfo($"Webhook: NoPayn order {nopaynOrderId} status={status} for nopCommerce order #{order.Id}");
+
+            // Preserve manual_capture flag if present
+            var previousResult = order.AuthorizationTransactionResult ?? string.Empty;
+            var manualCaptureFlag = previousResult.Contains("manual_capture") ? "|manual_capture" : string.Empty;
+            order.AuthorizationTransactionResult = status + manualCaptureFlag;
             await _orderService.UpdateOrderAsync(order);
 
             if (status == "completed")
@@ -147,6 +178,7 @@ public class NoPaynPaymentController : Controller
         }
         catch (Exception ex)
         {
+            _nopaynLogger.LogError($"Webhook error for NoPayn order {nopaynOrderId}", ex);
             await _logger.ErrorAsync($"NoPayn webhook error for order {nopaynOrderId}", ex);
             return StatusCode(500);
         }

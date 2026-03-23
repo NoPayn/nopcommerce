@@ -58,6 +58,15 @@
             </div>
             <div class="form-group row">
                 <div class="col-md-3">
+                    <nop-label asp-for="CreditCardManualCapture" />
+                </div>
+                <div class="col-md-9">
+                    <nop-editor asp-for="CreditCardManualCapture" />
+                    <span class="form-text text-muted">When enabled, credit card payments will be authorized but not captured until the order is shipped or completed.</span>
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-md-3">
                     <nop-label asp-for="AdditionalFee" />
                 </div>
                 <div class="col-md-9">
@@ -70,6 +79,15 @@
                 </div>
                 <div class="col-md-9">
                     <nop-editor asp-for="AdditionalFeePercentage" />
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-md-3">
+                    <nop-label asp-for="DebugLogging" />
+                </div>
+                <div class="col-md-9">
+                    <nop-editor asp-for="DebugLogging" />
+                    <span class="form-text text-muted">Enable detailed logging of API requests, responses, and webhook events to App_Data/Logs/NoPayn_debug.log.</span>
                 </div>
             </div>
             <div class="form-group row">
